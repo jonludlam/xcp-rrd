@@ -20,10 +20,6 @@
  * @group Performance Monitoring
  *)
 
-open Arrayext
-open Listext
-open Pervasiveext
-
 exception No_RRA_Available
 exception Parse_error
 exception Invalid_data_source of string
@@ -43,6 +39,100 @@ type sampling_frequency = Five_Seconds with rpc
 
 (* utility *)
 let isnan x = match classify_float x with | FP_nan -> true | _ -> false
+
+let finally fct clean_f =
+  let result =
+    try
+      fct ()
+    with
+      exn ->
+        clean_f (); 
+        raise exn
+  in
+  clean_f ();
+  result
+
+let array_index e a =
+  let len = Array.length a in
+  let rec check i =
+    if len <= i then -1
+    else if Array.get a i = e then i
+    else check (i + 1)
+  in check 0   
+
+let array_remove n a =
+  Array.append (Array.sub a 0 n) (Array.sub a (n+1) (Array.length a - n - 1))
+
+let filter_map f list =
+  let rec inner acc l =
+    match l with
+    | [] -> List.rev acc
+    | x::xs -> 
+      let acc = match f x with | Some res -> res::acc | None -> acc in
+      inner acc xs
+  in
+  inner [] list
+
+let rec setify = function
+	| [] -> []
+	| (x::xs) -> if List.mem x xs then setify xs else x::(setify xs)
+
+let temp_file_in_dir otherfile =
+  let base_dir = Filename.dirname otherfile in
+  let rec keep_trying () = 
+    try 
+      let uuid = Uuidm.to_string (Uuidm.create `V4) in
+      let newfile = base_dir ^ "/" ^ uuid in
+      Unix.close (Unix.openfile newfile [Unix.O_CREAT; Unix.O_TRUNC; Unix.O_EXCL] 0o600);
+      newfile
+    with
+      Unix.Unix_error (Unix.EEXIST, _, _)  -> keep_trying ()
+  in
+  keep_trying ()
+
+let unlink_safe file =
+  try Unix.unlink file with (* Unix.Unix_error (Unix.ENOENT, _ , _)*) _ -> ()
+
+let atomic_write_to_file fname perms f =
+  let tmp = temp_file_in_dir fname in
+  Unix.chmod tmp perms;
+  finally
+    (fun () ->
+      let fd = Unix.openfile tmp [Unix.O_WRONLY; Unix.O_CREAT] perms (* ignored since the file exists *) in
+      let result = finally
+	(fun () -> f fd)
+	(fun () -> Unix.close fd) in
+      Unix.rename tmp fname; (* Nb this only happens if an exception wasn't raised in the application of f *)
+      result)
+    (fun () -> unlink_safe tmp)
+
+let fd_blocks_fold block_size f start fd = 
+	let block = String.create block_size in
+	let rec fold acc = 
+		let n = Unix.read fd block 0 block_size in
+		(* Consider making the interface explicitly use Substrings *)
+		let s = if n = block_size then block else String.sub block 0 n in
+		if n = 0 then acc else fold (f acc s) in
+	fold start
+
+let buffer_of_fd fd = 
+	fd_blocks_fold 1024 (fun b s -> Buffer.add_string b s; b) (Buffer.create 1024) fd
+
+let with_file file mode perms f =
+	let fd = Unix.openfile file mode perms in
+	let r =
+		try f fd
+		with exn -> Unix.close fd; raise exn
+		in
+	Unix.close fd;
+	r
+
+let buffer_of_file file_path = with_file file_path [ Unix.O_RDONLY ] 0 buffer_of_fd
+
+let string_of_file file_path = Buffer.contents (buffer_of_file file_path)
+
+
+
 
 let cf_type_of_string s =
 	match s with
@@ -434,16 +524,16 @@ let rrd_add_ds rrd newds =
 
 (** Remove the named DS from an RRD. Removes all of the data associated with it, too *)
 let rrd_remove_ds rrd ds_name =
-	let n = Array.index ds_name (Array.map (fun ds -> ds.ds_name) rrd.rrd_dss) in
+	let n = array_index ds_name (Array.map (fun ds -> ds.ds_name) rrd.rrd_dss) in
 	if n = -1 then
 		raise (Invalid_data_source ds_name)
 	else
 		{ rrd with
-			rrd_dss = Array.remove n rrd.rrd_dss;
+			rrd_dss = array_remove n rrd.rrd_dss;
 			rrd_rras = Array.map (fun rra ->
 				{ rra with
-					rra_data = Array.remove n rra.rra_data;
-					rra_cdps = Array.remove n rra.rra_cdps }) rrd.rrd_rras; }
+					rra_data = array_remove n rra.rra_data;
+					rra_cdps = array_remove n rra.rra_cdps }) rrd.rrd_rras; }
 
 (** Find the RRA with a particular CF that contains a particular start
     time, and also has a minimum pdp_cnt. If it can't find an
@@ -474,7 +564,7 @@ let find_best_rras rrd pdp_interval cf start =
 		List.filter (contains_time newstarttime) rras
 
 let query_named_ds rrd ds_name cf =
-	let n = Array.index ds_name (Array.map (fun ds -> ds.ds_name) rrd.rrd_dss) in
+	let n = array_index ds_name (Array.map (fun ds -> ds.ds_name) rrd.rrd_dss) in
 	if n = -1 then
 		raise (Invalid_data_source ds_name)
 	else
@@ -617,7 +707,7 @@ let from_xml input =
 		| _ -> Xmlm.input_tree ~data ~el input
 	in
 
-	let kvs elts = List.filter_map 
+	let kvs elts = filter_map 
 		(function | El(key,[D value]) -> Some (key,value) | _ -> None) elts in
 
 	let find key elts =
@@ -649,7 +739,7 @@ let from_xml input =
 
 		let process_cdp_preps elts =
 			let cdps =
-				List.filter_map (function | El ("ds",elts) -> Some (process_cdp_prep elts) | _ -> None) elts in
+				filter_map (function | El ("ds",elts) -> Some (process_cdp_prep elts) | _ -> None) elts in
 			cdps
 		in
 
@@ -696,8 +786,8 @@ let from_xml input =
 	in
 	match tree with
 	| El ("rrd",elts) ->
-		let dss = List.filter_map (function El ("ds",elts) -> Some (process_ds elts) | _ -> None) elts in
-		let rras = List.filter_map (function El ("rra",elts) -> Some (process_rra elts) | _ -> None) elts in 	
+		let dss = filter_map (function El ("ds",elts) -> Some (process_ds elts) | _ -> None) elts in
+		let rras = filter_map (function El ("rra",elts) -> Some (process_rra elts) | _ -> None) elts in 	
 		let kvs = kvs elts in
 		let rrd = {last_updated=float_of_string (List.assoc "lastupdate" kvs);
 		timestep=Int64.of_string (List.assoc "step" kvs);
@@ -705,7 +795,7 @@ let from_xml input =
 		rrd_rras=Array.of_list rras} in
 		(* Purge any repeated data sources from the RRD *)
 		let ds_names = ds_names rrd in
-		let ds_names_set = Listext.List.setify ds_names in
+		let ds_names_set = setify ds_names in
 		let ds_name_counts = List.map (fun name ->
 			let (x,y) = List.partition ((=) name) ds_names in
 			(name,List.length x)) ds_names_set
@@ -721,8 +811,9 @@ let from_xml input =
 			inner rrd n) rrd removals_required
 	| _ -> failwith "Bad xml!"
 
+
 let of_file filename =
-	let body = Unixext.string_of_file filename in
+	let body = string_of_file filename in
 	let input = Xmlm.make_input (`String (0,body)) in
 	from_xml input
 
@@ -878,7 +969,7 @@ let to_bigbuffer ?(json=false) rrd =
 let to_fd ?(json=false) rrd fd = (if json then json_to_fd else xml_to_fd) rrd fd
 
 let to_file ?(json=false) rrd filename = 
-  Unixext.atomic_write_to_file filename 0o644 (to_fd ~json rrd)
+  atomic_write_to_file filename 0o644 (to_fd ~json rrd)
 
 (** WARNING WARNING: Do not call the following function from within xapi! *)
 let text_export rrd grouping =
