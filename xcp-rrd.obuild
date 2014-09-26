@@ -8,16 +8,16 @@ obuild-ver:  1
 library xcp-rrd
   src-dir: lib
   modules: Rrd
-  build-deps: stdext, rpclib, rpclib.syntax
+  build-deps: rpclib, rpclib.syntax, uuidm
   pp: camlp4o
 
 executable rewrite
   src-dir: test
   main: rewrite.ml
-  build-deps: xcp-rrd
+  build-deps: xcp-rrd, unix, bigarray
 
 executable dummy
   src-dir: test
   main: dummy.ml
-  build-deps: xcp-rrd
+  build-deps: xcp-rrd, unix, bigarray
 
