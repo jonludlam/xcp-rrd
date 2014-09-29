@@ -7,7 +7,7 @@ obuild-ver:  1
 
 library xcp-rrd
   src-dir: lib
-  modules: Rrd, Rrd_unix
+  modules: Rrd, Rrd_unix, Fring, Utils
   build-deps: rpclib, rpclib.syntax, uuidm
   pp: camlp4o
 
