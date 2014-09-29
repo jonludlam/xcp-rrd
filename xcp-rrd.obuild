@@ -21,3 +21,7 @@ executable dummy
   main: dummy.ml
   build-deps: xcp-rrd, unix, bigarray
 
+executable unit_tests
+  src-dir: test
+  main: unit_tests.ml
+  build-deps: xcp-rrd, unix, bigarray, oUnit
