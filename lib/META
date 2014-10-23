@@ -1,9 +1,12 @@
+# OASIS_START
+# DO NOT EDIT (digest: 8f0618acabc815911bfb65637b0007b6)
 version = "0.9.0"
-description = "RRD library"
-requires = "rpclib rpclib.syntax"
-archive(byte) = "xcp-rrd.cma"
-archive(byte, plugin) = "xcp-rrd.cma"
-archive(native) = "xcp-rrd.cmxa"
-archive(native, plugin) = "xcp-rrd.cmxs"
-exists_if = "xcp-rrd.cma"
+description = "RRD manipulation library"
+requires = "rpclib rpclib.syntax uuidm"
+archive(byte) = "xapi_rrd.cma"
+archive(byte, plugin) = "xapi_rrd.cma"
+archive(native) = "xapi_rrd.cmxa"
+archive(native, plugin) = "xapi_rrd.cmxs"
+exists_if = "xapi_rrd.cma"
+# OASIS_STOP
 

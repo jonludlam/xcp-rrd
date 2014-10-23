@@ -1,5 +1,6 @@
 
 open OUnit
+open Xapi_rrd
 open Rrd
 
 let compareish f1 f2 =
